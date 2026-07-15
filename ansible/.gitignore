@@ -1,0 +1,5 @@
+# A binary shipped inside the role is a build artefact, not source.
+roles/waveshare_ups/files/waveshare-ups
+
+inventory.ini
+*.retry

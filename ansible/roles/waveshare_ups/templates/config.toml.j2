@@ -1,0 +1,54 @@
+# {{ ansible_managed }}
+# Local edits will be overwritten on the next run -- change the role variables instead.
+# Every option here is documented in packaging/config.toml.example in the source repo.
+
+[i2c]
+bus = {{ waveshare_ups_i2c_bus | int }}
+address = {{ '0x%02x' % waveshare_ups_i2c_address }}
+
+[battery]
+cells = {{ waveshare_ups_battery_cells | float }}
+empty_volts_per_cell = {{ waveshare_ups_battery_empty_volts_per_cell | float }}
+full_volts_per_cell = {{ waveshare_ups_battery_full_volts_per_cell | float }}
+internal_resistance_ohms = {{ waveshare_ups_battery_internal_resistance_ohms | float }}
+ema_alpha = {{ waveshare_ups_battery_ema_alpha | float }}
+
+[mqtt]
+host = {{ waveshare_ups_mqtt_host | to_json }}
+port = {{ waveshare_ups_mqtt_port | int }}
+{% if waveshare_ups_mqtt_username is not none %}
+username = {{ waveshare_ups_mqtt_username | to_json }}
+{% endif %}
+{% if waveshare_ups_mqtt_password is not none %}
+password = {{ waveshare_ups_mqtt_password | to_json }}
+{% endif %}
+base_topic = {{ waveshare_ups_mqtt_base_topic | to_json }}
+discovery_prefix = {{ waveshare_ups_mqtt_discovery_prefix | to_json }}
+{% if waveshare_ups_mqtt_device_id is not none %}
+device_id = {{ waveshare_ups_mqtt_device_id | to_json }}
+{% else %}
+# device_id unset: the daemon derives it from the hostname, slugified.
+{% endif %}
+keep_alive_secs = {{ waveshare_ups_mqtt_keep_alive_secs | int }}
+
+[monitor]
+poll_interval_secs = {{ waveshare_ups_poll_interval_secs | int }}
+charging_threshold_ma = {{ waveshare_ups_charging_threshold_ma | float }}
+discharging_threshold_ma = {{ waveshare_ups_discharging_threshold_ma | float }}
+confirm_cycles = {{ waveshare_ups_confirm_cycles | int }}
+
+[hooks]
+low_threshold_pct = {{ waveshare_ups_low_threshold_pct | float }}
+critical_threshold_pct = {{ waveshare_ups_critical_threshold_pct | float }}
+hysteresis_pct = {{ waveshare_ups_hysteresis_pct | float }}
+timeout_secs = {{ waveshare_ups_hook_timeout_secs | int }}
+fire_on_startup = {{ 'true' if waveshare_ups_fire_on_startup | bool else 'false' }}
+
+{% for event in ['on_battery_low', 'on_battery_ok', 'on_battery_critical', 'on_battery_critical_clear', 'on_power_lost', 'on_power_restored'] %}
+{% set target = lookup('vars', 'waveshare_ups_' ~ event) %}
+{% if target is not none %}
+{{ event }} = {{ target | to_json }}
+{% else %}
+# {{ event }} unset: no action for this event.
+{% endif %}
+{% endfor %}

@@ -1,0 +1,25 @@
+---
+# Config mistakes are cheaper to catch here than at 3am on battery. These mirror the
+# daemon's own validate() in src/config.rs; it re-checks them at startup regardless.
+#
+# Kept in its own file so it can be run on its own -- `tasks_from: validate` -- to check a
+# host's variables without installing anything.
+- name: Validate role variables
+  ansible.builtin.assert:
+    that:
+      # default('', true) so an explicit `~` reports the message below rather than a
+      # NoneType error out of the length filter.
+      - waveshare_ups_mqtt_host | default('', true) | length > 0
+      - waveshare_ups_battery_cells | float > 0.0
+      - waveshare_ups_battery_full_volts_per_cell | float > waveshare_ups_battery_empty_volts_per_cell | float
+      - waveshare_ups_battery_internal_resistance_ohms | float >= 0.0
+      - waveshare_ups_battery_ema_alpha | float > 0.0
+      - waveshare_ups_battery_ema_alpha | float <= 1.0
+      - waveshare_ups_poll_interval_secs | int > 0
+      - waveshare_ups_critical_threshold_pct | float <= waveshare_ups_low_threshold_pct | float
+      - waveshare_ups_hysteresis_pct | float >= 0.0
+    fail_msg: >-
+      Invalid waveshare_ups variables. waveshare_ups_mqtt_host is required and has no default;
+      thresholds must satisfy critical <= low, full_volts_per_cell > empty_volts_per_cell,
+      and 0 < ema_alpha <= 1.
+    quiet: true

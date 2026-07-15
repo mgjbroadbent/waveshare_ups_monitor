@@ -1,0 +1,86 @@
+---
+# Every value below reproduces the daemon's own default (src/config.rs), so a minimal
+# playbook only needs to set waveshare_ups_mqtt_host.
+
+# --- Inputs: where the artefacts come from -----------------------------------------
+#
+# The binary is an input to the role. A RELATIVE path is resolved against the role's
+# own files/ directory, so dropping the executable at
+#   roles/waveshare_ups/files/waveshare-ups
+# ships it inside the role and needs no configuration at all.
+#
+# An ABSOLUTE path is used as-is, so the binary can equally live outside the role:
+#   waveshare_ups_binary_src: ~/Code/waveshare-ups/target/aarch64-unknown-linux-gnu/release/waveshare-ups
+#
+# Either way it must be an aarch64 Linux ELF -- see the Build section of the README.
+waveshare_ups_binary_src: waveshare-ups
+
+# Directory whose contents are copied to {{ waveshare_ups_config_dir }}/hooks/.
+# Same relative/absolute rule as the binary; the role ships the examples from
+# packaging/hooks/. Set to "" to manage the hooks directory yourself.
+waveshare_ups_hooks_src: hooks
+
+# --- Install layout ----------------------------------------------------------------
+waveshare_ups_binary_path: /usr/local/bin/waveshare-ups
+waveshare_ups_config_dir: /etc/waveshare-ups
+waveshare_ups_config_path: "{{ waveshare_ups_config_dir }}/config.toml"
+
+# --- Service -----------------------------------------------------------------------
+waveshare_ups_service_name: waveshare-ups
+waveshare_ups_service_enabled: true
+waveshare_ups_service_state: started
+waveshare_ups_log_level: info
+
+# The unit runs as root: it needs /dev/i2c-N, and hook scripts generally need privilege
+# to stop and start services. To run unprivileged, name a user that is in the i2c group.
+# NoNewPrivileges is deliberately never set -- it would break `sudo` inside hooks.
+waveshare_ups_user: root
+
+# Fail early if /dev/i2c-<bus> is missing rather than leaving a crash-looping unit.
+# Turn off for images that enable I2C on a later boot.
+waveshare_ups_check_i2c: true
+
+# --- [i2c] -------------------------------------------------------------------------
+waveshare_ups_i2c_bus: 1
+waveshare_ups_i2c_address: 0x41  # UPS Module 3S. A 2S HAT is 0x42 (and cells = 2).
+
+# --- [battery] ---------------------------------------------------------------------
+waveshare_ups_battery_cells: 3.0
+waveshare_ups_battery_empty_volts_per_cell: 3.0
+waveshare_ups_battery_full_volts_per_cell: 4.2
+# THE ONE VALUE WORTH TUNING -- see the Tuning section of the project README.
+waveshare_ups_battery_internal_resistance_ohms: 0.20
+waveshare_ups_battery_ema_alpha: 0.2
+
+# --- [mqtt] ------------------------------------------------------------------------
+waveshare_ups_mqtt_host: ""  # REQUIRED
+waveshare_ups_mqtt_port: 1883
+waveshare_ups_mqtt_username: ~
+waveshare_ups_mqtt_password: ~
+waveshare_ups_mqtt_base_topic: waveshare-ups
+waveshare_ups_mqtt_discovery_prefix: homeassistant
+waveshare_ups_mqtt_device_id: ~  # defaults to the target's hostname, slugified
+waveshare_ups_mqtt_keep_alive_secs: 30
+
+# --- [monitor] ---------------------------------------------------------------------
+waveshare_ups_poll_interval_secs: 2
+waveshare_ups_charging_threshold_ma: 50.0
+waveshare_ups_discharging_threshold_ma: 50.0
+waveshare_ups_confirm_cycles: 3
+
+# --- [hooks] -----------------------------------------------------------------------
+waveshare_ups_low_threshold_pct: 20.0
+waveshare_ups_critical_threshold_pct: 5.0
+waveshare_ups_hysteresis_pct: 5.0
+waveshare_ups_hook_timeout_secs: 60
+waveshare_ups_fire_on_startup: false
+
+# Set any of these to ~ to leave the event unhandled. The defaults wire up the example
+# scripts, matching packaging/config.toml.example -- note that battery-critical.sh
+# powers the machine off.
+waveshare_ups_on_battery_low: "{{ waveshare_ups_config_dir }}/hooks/battery-low.sh"
+waveshare_ups_on_battery_ok: "{{ waveshare_ups_config_dir }}/hooks/battery-ok.sh"
+waveshare_ups_on_battery_critical: "{{ waveshare_ups_config_dir }}/hooks/battery-critical.sh"
+waveshare_ups_on_battery_critical_clear: ~
+waveshare_ups_on_power_lost: "{{ waveshare_ups_config_dir }}/hooks/power-lost.sh"
+waveshare_ups_on_power_restored: "{{ waveshare_ups_config_dir }}/hooks/power-restored.sh"

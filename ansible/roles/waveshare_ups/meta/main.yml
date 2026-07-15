@@ -1,0 +1,25 @@
+---
+galaxy_info:
+  role_name: waveshare_ups
+  author: Mark Broadbent
+  description: >-
+    Deploy the Waveshare UPS Module 3S monitor: INA219 over I2C to MQTT with Home
+    Assistant discovery, plus battery threshold hook scripts, as a systemd unit.
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Debian
+      versions:
+        - buster
+        - bullseye
+        - bookworm
+        - trixie
+  galaxy_tags:
+    - raspberrypi
+    - ups
+    - mqtt
+    - homeassistant
+    - systemd
+    - i2c
+
+dependencies: []

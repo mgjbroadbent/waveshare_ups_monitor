@@ -1,0 +1,119 @@
+---
+- name: Validate role variables
+  ansible.builtin.import_tasks: validate.yml
+
+# A relative src resolves against the role's files/ dir, an absolute one is taken as-is.
+# first_found reproduces that so a missing binary fails here, with a message that says
+# what to do, rather than inside the copy task.
+#
+# query() with skip: true returns [] when nothing matches, which `first | default('')`
+# turns into an empty string. The lookup() form instead returns None, whose falseness is
+# version-dependent once it reaches a template -- `| length` on it raises a NoneType
+# error and buries the assert message below.
+- name: Resolve the binary source
+  ansible.builtin.set_fact:
+    _waveshare_ups_binary_resolved: >-
+      {{ query('ansible.builtin.first_found', _params) | first | default('', true) }}
+  vars:
+    _params:
+      files:
+        - "{{ waveshare_ups_binary_src }}"
+      paths:
+        - "{{ role_path }}/files"
+      skip: true
+  # Lookups always run on the controller, so this needs no delegation. check_mode: false
+  # keeps --check runs working, which would otherwise skip the fact and fail below.
+  check_mode: false
+
+- name: Assert the binary was found
+  ansible.builtin.assert:
+    that:
+      - _waveshare_ups_binary_resolved | length > 0
+    fail_msg: >-
+      Could not find the waveshare-ups executable at "{{ waveshare_ups_binary_src }}".
+      Either build it and drop it in {{ role_path }}/files/ to ship it inside the role, or
+      set waveshare_ups_binary_src to an absolute path to build it elsewhere. Cross-compile
+      with: cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.28
+    quiet: true
+
+- name: Check that the I2C bus exists
+  when: waveshare_ups_check_i2c | bool
+  block:
+    - name: Stat /dev/i2c-{{ waveshare_ups_i2c_bus }}
+      ansible.builtin.stat:
+        path: /dev/i2c-{{ waveshare_ups_i2c_bus }}
+      register: _waveshare_ups_i2c_dev
+
+    - name: Assert the I2C bus is enabled
+      ansible.builtin.assert:
+        that:
+          - _waveshare_ups_i2c_dev.stat.exists
+        fail_msg: >-
+          /dev/i2c-{{ waveshare_ups_i2c_bus }} is missing, so the daemon would only crash-loop.
+          Enable I2C with `sudo raspi-config` (Interface Options -> I2C) and reboot, then confirm
+          the module answers with `i2cdetect -y {{ waveshare_ups_i2c_bus }}` -- expect
+          {{ '0x%02x' % waveshare_ups_i2c_address }}. Set waveshare_ups_check_i2c=false to skip this.
+        quiet: true
+
+- name: Install the executable
+  ansible.builtin.copy:
+    src: "{{ _waveshare_ups_binary_resolved }}"
+    dest: "{{ waveshare_ups_binary_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart waveshare-ups
+
+# Catches a wrong-architecture or wrong-glibc build immediately, with the linker's own
+# error, instead of leaving a unit that restarts forever.
+- name: Verify the installed executable runs on this host
+  ansible.builtin.command: "{{ waveshare_ups_binary_path }} --help"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Create the config directory
+  ansible.builtin.file:
+    path: "{{ waveshare_ups_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the hook scripts
+  ansible.builtin.copy:
+    src: "{{ waveshare_ups_hooks_src }}/"
+    dest: "{{ waveshare_ups_config_dir }}/hooks/"
+    owner: root
+    group: root
+    mode: "0755"
+  # "" or ~ both mean "leave the hooks directory alone".
+  when: waveshare_ups_hooks_src | default('', true) | length > 0
+  # No handler: hooks are exec'd fresh on each event, so a change takes effect immediately.
+
+# 0600 because this file can hold the MQTT password.
+- name: Install the configuration
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: "{{ waveshare_ups_config_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart waveshare-ups
+
+- name: Install the systemd unit
+  ansible.builtin.template:
+    src: waveshare-ups.service.j2
+    dest: /etc/systemd/system/{{ waveshare_ups_service_name }}.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart waveshare-ups
+
+- name: Enable and start the service
+  ansible.builtin.systemd:
+    name: "{{ waveshare_ups_service_name }}"
+    enabled: "{{ waveshare_ups_service_enabled | bool }}"
+    state: "{{ waveshare_ups_service_state }}"
+    daemon_reload: true

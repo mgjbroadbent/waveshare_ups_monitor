@@ -1,0 +1,16 @@
+---
+- name: Deploy the Waveshare UPS monitor
+  hosts: waveshare_ups
+  become: true
+
+  roles:
+    - role: waveshare_ups
+      vars:
+        waveshare_ups_mqtt_host: mqtt.local
+
+        # Ship the binary from outside the role. Drop it in roles/waveshare_ups/files/
+        # instead and this line goes away entirely.
+        waveshare_ups_binary_src: "{{ playbook_dir }}/../target/aarch64-unknown-linux-gnu/release/waveshare-ups"
+
+        # The value worth tuning -- see the Tuning section of the project README.
+        # waveshare_ups_battery_internal_resistance_ohms: 0.20

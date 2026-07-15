@@ -1,0 +1,13 @@
+---
+# Handlers run in the order they are DEFINED, not the order they are notified, so the
+# daemon-reload below always lands before the restart that depends on it.
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart waveshare-ups
+  ansible.builtin.systemd:
+    name: "{{ waveshare_ups_service_name }}"
+    state: restarted
+  # Nothing to restart if the play deliberately leaves the service down.
+  when: waveshare_ups_service_state in ['started', 'restarted']

@@ -1,0 +1,34 @@
+[Unit]
+# {{ ansible_managed }}
+Description=Waveshare UPS monitor (INA219 -> MQTT, battery threshold hooks)
+Documentation=https://github.com/waveshare-ups
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={{ waveshare_ups_binary_path }} --config {{ waveshare_ups_config_path }}
+Restart=always
+RestartSec=5
+Environment=RUST_LOG={{ waveshare_ups_log_level }}
+{% if waveshare_ups_user != 'root' %}
+
+# Unprivileged: {{ waveshare_ups_user }} must be in the i2c group to open the device, and
+# hook scripts have only this user's privileges.
+User={{ waveshare_ups_user }}
+{% else %}
+
+# Runs as root: it needs /dev/i2c-{{ waveshare_ups_i2c_bus }}, and the hook scripts need privilege to stop and start services.
+{% endif %}
+# NoNewPrivileges is deliberately NOT set -- it would break `sudo` inside hook scripts.
+DeviceAllow=/dev/i2c-{{ waveshare_ups_i2c_bus }} rw
+ProtectHome=yes
+ProtectSystem=strict
+
+# The shutdown path publishes "offline" to MQTT before disconnecting (a clean MQTT disconnect
+# suppresses the last will), and any in-flight hook script needs to finish. Give it room.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
