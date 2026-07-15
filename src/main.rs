@@ -52,6 +52,14 @@ async fn main() -> Result<()> {
         device_id = %topics.device_id,
         broker = %format!("{}:{}", config.mqtt.host, config.mqtt.port),
         simulate = cli.simulate,
+        // The values that decide whether a transition is real or noise, so a log excerpt says which
+        // config was actually in effect rather than which one was assumed.
+        poll_interval_secs = config.monitor.poll_interval_secs,
+        confirm_cycles = config.monitor.confirm_cycles,
+        discharging_threshold_ma = config.monitor.discharging_threshold_ma,
+        charging_threshold_ma = config.monitor.charging_threshold_ma,
+        ema_alpha = config.battery.ema_alpha,
+        internal_resistance_ohms = config.battery.internal_resistance_ohms,
         "starting"
     );
 
@@ -138,6 +146,9 @@ async fn main() -> Result<()> {
                 };
 
                 let reading = monitor.evaluate(sample);
+                // Deliberately the raw reading, before the latches: this is the per-sample view, and
+                // seeing an isolated transient here next to a steady `reported` state is how you
+                // tell noise from a real dropout.
                 debug!(
                     bus_v = format!("{:.3}", reading.bus_voltage_v),
                     oc_v = format!("{:.3}", reading.compensated_voltage_v),
@@ -146,14 +157,35 @@ async fn main() -> Result<()> {
                     battery_pct = format!("{:.1}", reading.battery_pct),
                     charging = reading.charging,
                     external_power = reading.external_power,
-                    "reading"
+                    "reading (instantaneous)"
                 );
+
+                let events = machine.update(&reading);
+
+                // What we tell the world, and what the hooks are told they acted on: the latched
+                // states, so a single noisy sample cannot flap the Home Assistant entities.
+                let reported = machine.reported(&reading);
 
                 // Hooks first, and independent of MQTT: losing the broker must not stop us shutting
                 // services down on a flat battery.
-                for event in machine.update(&reading) {
-                    info!(event = event.as_str(), "hook event");
-                    if let Err(e) = hook_tx.try_send((event, reading)) {
+                for event in events {
+                    // The whole reading, not just the event name: a transition driven by a genuine
+                    // change and one driven by a single noisy sample are indistinguishable
+                    // afterwards otherwise, and the per-tick log above is debug-only so it is not
+                    // there to correlate against on a live system.
+                    info!(
+                        event = event.as_str(),
+                        bus_v = format!("{:.3}", reported.bus_voltage_v),
+                        oc_v = format!("{:.3}", reported.compensated_voltage_v),
+                        current_a = format!("{:.3}", reported.current_a),
+                        power_w = format!("{:.3}", reported.power_w),
+                        battery_pct = format!("{:.1}", reported.battery_pct),
+                        charging = reported.charging,
+                        external_power = reported.external_power,
+                        confirm_cycles = config.monitor.confirm_cycles,
+                        "hook event"
+                    );
+                    if let Err(e) = hook_tx.try_send((event, reported)) {
                         error!(event = event.as_str(), "dropping hook event: {e}");
                     }
                 }
@@ -161,7 +193,7 @@ async fn main() -> Result<()> {
                 // Non-blocking, and only debug: while the broker is down this would otherwise warn
                 // on every tick for as long as the outage lasts. The event loop already reports the
                 // connection failure itself.
-                if let Err(e) = mqtt::publish_state(&client, &topics, &reading) {
+                if let Err(e) = mqtt::publish_state(&client, &topics, &reported) {
                     debug!("dropping state publish: {e}");
                 }
             }

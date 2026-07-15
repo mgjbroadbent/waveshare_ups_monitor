@@ -3,6 +3,9 @@
 //! Two mechanisms stop a battery sitting on a threshold from flapping services up and down:
 //! *hysteresis* (recovery must clear `threshold + hysteresis`, not just `threshold`) and *debounce*
 //! (`confirm_cycles` consecutive readings before any transition is accepted).
+//!
+//! The latched state is also the state we *report*, via `reported` -- see its comment. Anything that
+//! tells the outside world what the UPS is doing should agree with what the hooks acted on.
 
 use crate::battery::Reading;
 use crate::config::HooksConfig;
@@ -90,6 +93,10 @@ pub struct HookMachine {
     low: Latch,
     critical: Latch,
     power: Latch,
+    /// Debounced for reporting only -- no hook fires on a charge/discharge change. It is latched
+    /// because MQTT publishes it as a binary_sensor, and it flaps for exactly the same reason
+    /// `power` does.
+    charging: Latch,
     low_threshold: f64,
     critical_threshold: f64,
     hysteresis: f64,
@@ -104,6 +111,7 @@ impl HookMachine {
             low: Latch::new(),
             critical: Latch::new(),
             power: Latch::new(),
+            charging: Latch::new(),
             low_threshold: hooks.low_threshold_pct,
             critical_threshold: hooks.critical_threshold_pct,
             hysteresis: hooks.hysteresis_pct,
@@ -129,6 +137,9 @@ impl HookMachine {
                 Event::PowerRestored
             });
         }
+
+        // Emits nothing; kept in step purely so `reported` has a debounced value to hand out.
+        self.charging.update(reading.charging, self.confirm_cycles);
 
         let low_now = Self::trip(self.low.tripped, reading.battery_pct, self.low_threshold, self.hysteresis);
         let low_event = self
@@ -174,6 +185,30 @@ impl HookMachine {
         }
 
         events
+    }
+
+    /// `reading` with the instantaneous binary states replaced by their latched equivalents.
+    ///
+    /// `Reading::external_power` and `charging` are each derived from one sample's current, so a
+    /// momentary load transient past the deadband flips them for a single tick. The hooks have
+    /// always been shielded from that by the latches; publishing the raw `Reading` meant Home
+    /// Assistant was not, and showed mains dropouts the hooks had correctly ignored. Reporting the
+    /// latched view instead is what keeps the two telling the same story.
+    ///
+    /// The numeric fields are passed through untouched: they are genuine per-sample measurements,
+    /// and `battery_pct` already has the EMA behind it.
+    ///
+    /// Call after `update`, which seeds the latches. Before that the raw values pass through, which
+    /// is the same value `update` would have latched from this reading anyway.
+    pub fn reported(&self, reading: &Reading) -> Reading {
+        Reading {
+            external_power: self
+                .power
+                .tripped
+                .map_or(reading.external_power, |lost| !lost),
+            charging: self.charging.tripped.unwrap_or(reading.charging),
+            ..*reading
+        }
     }
 
     /// Hysteresis applies only to recovery: trip at `threshold`, recover above `threshold + hyst`.
@@ -270,6 +305,15 @@ mod tests {
             battery_pct: pct,
             charging: external_power,
             external_power,
+        }
+    }
+
+    /// `charging` and `external_power` set independently: a pack idling on mains is neither
+    /// charging nor discharging, which `reading_with_power` cannot express.
+    fn reading_with(pct: f64, external_power: bool, charging: bool) -> Reading {
+        Reading {
+            charging,
+            ..reading_with_power(pct, external_power)
         }
     }
 
@@ -437,6 +481,101 @@ mod tests {
         assert_eq!(drive(&mut m, &[8.0]), vec![]);
         assert_eq!(drive(&mut m, &[11.0]), vec![Event::BatteryCriticalClear]);
         assert_eq!(drive(&mut m, &[26.0]), vec![Event::BatteryOk]);
+    }
+
+    /// The bug this exists to prevent: a one-sample current transient past the deadband made
+    /// `Reading::external_power` false for a single tick, and publishing that raw value showed a
+    /// mains dropout in Home Assistant that the hooks had correctly debounced away.
+    #[test]
+    fn reported_power_ignores_a_single_sample_dropout_the_hooks_ignored() {
+        let mut m = HookMachine::new(&hooks_cfg(), 3);
+        m.update(&reading_with_power(90.0, true));
+
+        let dropout = reading_with_power(90.0, false);
+        assert_eq!(m.update(&dropout), vec![], "one sample must not fire a hook");
+        assert!(
+            m.reported(&dropout).external_power,
+            "and must not be reported either -- the raw reading says false"
+        );
+
+        // Back to normal: the latch never moved, so neither does the reported state.
+        let normal = reading_with_power(90.0, true);
+        m.update(&normal);
+        assert!(m.reported(&normal).external_power);
+    }
+
+    #[test]
+    fn reported_power_follows_a_sustained_loss_once_confirmed() {
+        let mut m = HookMachine::new(&hooks_cfg(), 3);
+        m.update(&reading_with_power(90.0, true));
+
+        let lost = reading_with_power(90.0, false);
+        for _ in 0..2 {
+            m.update(&lost);
+            assert!(m.reported(&lost).external_power, "not confirmed yet");
+        }
+        assert_eq!(m.update(&lost), vec![Event::PowerLost]);
+        assert!(
+            !m.reported(&lost).external_power,
+            "reported state must flip on the same tick the hook fires"
+        );
+    }
+
+    #[test]
+    fn reported_charging_is_debounced_the_same_way() {
+        let mut m = HookMachine::new(&hooks_cfg(), 3);
+        m.update(&reading_with(90.0, true, true));
+
+        // A single tick where the charge current dips inside the deadband.
+        let dip = reading_with(90.0, true, false);
+        m.update(&dip);
+        assert!(m.reported(&dip).charging, "one sample must not flap charging");
+
+        // Sustained: the charger has genuinely tapered off.
+        for _ in 0..2 {
+            m.update(&dip);
+        }
+        assert!(!m.reported(&dip).charging);
+    }
+
+    #[test]
+    fn reported_leaves_the_measurements_untouched() {
+        // Only the two latched booleans are substituted; the numbers are real per-sample readings
+        // and must reach MQTT exactly as measured.
+        let mut m = HookMachine::new(&hooks_cfg(), 3);
+        let r = reading_with_power(90.0, true);
+        m.update(&r);
+
+        let got = m.reported(&r);
+        assert_eq!(got.bus_voltage_v, r.bus_voltage_v);
+        assert_eq!(got.compensated_voltage_v, r.compensated_voltage_v);
+        assert_eq!(got.current_a, r.current_a);
+        assert_eq!(got.power_w, r.power_w);
+        assert_eq!(got.battery_pct, r.battery_pct);
+    }
+
+    #[test]
+    fn reported_passes_raw_values_through_before_the_first_update() {
+        // Nothing latched yet, so there is no debounced view to offer.
+        let m = HookMachine::new(&hooks_cfg(), 3);
+        let r = reading_with(90.0, false, false);
+        assert!(!m.reported(&r).external_power);
+        assert!(!m.reported(&r).charging);
+    }
+
+    #[test]
+    fn reported_tracks_the_latch_across_a_full_outage_and_recovery() {
+        // The invariant that matters: what HA shows and what the hooks did never disagree.
+        let mut m = HookMachine::new(&hooks_cfg(), 1);
+        m.update(&reading_with_power(90.0, true));
+
+        let lost = reading_with_power(90.0, false);
+        assert_eq!(m.update(&lost), vec![Event::PowerLost]);
+        assert!(!m.reported(&lost).external_power);
+
+        let back = reading_with_power(90.0, true);
+        assert_eq!(m.update(&back), vec![Event::PowerRestored]);
+        assert!(m.reported(&back).external_power);
     }
 
     #[test]
