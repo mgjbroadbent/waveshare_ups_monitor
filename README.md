@@ -11,7 +11,8 @@ threshold or mains power comes and goes.
 
 ## How battery percentage is calculated
 
-The brief asked for two formulas: [`INA219.py:287`](INA219.py#L287) while charging, and
+The brief asked for two formulas: [Waveshare's `INA219.py:287`](https://www.waveshare.com/wiki/UPS_Module_3S)
+(from the vendor's UPS Module 3S demo code) while charging, and
 [ugursayar/ups_hat `ups_shutdown.py:128`](https://github.com/ugursayar/ups_hat/blob/master/ups_shutdown.py)
 while discharging. Those turn out to be **the same formula at different cell counts**:
 
