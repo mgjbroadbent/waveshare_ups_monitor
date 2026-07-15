@@ -1,0 +1,33 @@
+[package]
+name = "waveshare-ups"
+version = "0.1.0"
+edition = "2021"
+description = "Waveshare UPS Module 3S monitor: MQTT reporting with Home Assistant discovery, plus threshold hook scripts"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+gethostname = "1"
+# default-features = false drops rustls, and with it the `ring` C dependency. That keeps the binary
+# small and, more usefully, lets you cross-compile with nothing but `rustup target add` -- no C
+# cross-toolchain, no Docker. Re-enable "use-rustls" if you need TLS to the broker.
+rumqttc = { version = "0.24", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "signal", "sync", "time"] }
+tokio-util = "0.7"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# `no_transaction` is mandatory on a Raspberry Pi: the crate's own Cargo.toml notes that I2C
+# transactions raise "operation not supported" there, and every one of its examples requires it.
+# `paranoid` adds measurement range checks and config readback -- worth the extra bus reads here.
+ina219 = { version = "0.2.1", default-features = false, features = ["sync", "std", "no_transaction", "paranoid"] }
+
+# The I2C HAL is Linux-only and will not build on macOS, so it is target-gated. The `ina219` crate
+# itself is no_std-capable and compiles anywhere, which keeps `cargo test` working on a dev Mac.
+[target.'cfg(target_os = "linux")'.dependencies]
+linux-embedded-hal = { version = "0.4", features = ["i2c"] }

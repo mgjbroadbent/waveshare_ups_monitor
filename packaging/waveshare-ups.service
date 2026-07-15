@@ -1,0 +1,27 @@
+[Unit]
+Description=Waveshare UPS monitor (INA219 -> MQTT, battery threshold hooks)
+Documentation=https://github.com/waveshare-ups
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/waveshare-ups --config /etc/waveshare-ups/config.toml
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+
+# Runs as root: it needs /dev/i2c-1, and the hook scripts need privilege to stop and start services.
+# NoNewPrivileges is deliberately NOT set -- it would break `sudo` inside hook scripts.
+# For a non-root setup, see the README.
+DeviceAllow=/dev/i2c-1 rw
+ProtectHome=yes
+ProtectSystem=strict
+
+# The shutdown path publishes "offline" to MQTT before disconnecting (a clean MQTT disconnect
+# suppresses the last will), and any in-flight hook script needs to finish. Give it room.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

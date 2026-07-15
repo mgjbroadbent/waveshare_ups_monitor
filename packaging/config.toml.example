@@ -1,0 +1,78 @@
+# Waveshare UPS monitor configuration.
+# Install to /etc/waveshare-ups/config.toml. Every value below is a default except mqtt.host,
+# so a minimal config is just the [mqtt] section.
+
+[i2c]
+bus = 1         # /dev/i2c-1
+address = 0x41  # UPS Module 3S. Confirm with: i2cdetect -y 1
+
+[battery]
+# 3S pack: 3 cells x 3.0V empty = 9.0V, x 4.2V full = 12.6V. This reproduces the vendor curve at
+# INA219.py:287. For a 2S HAT set cells = 2 (giving the 6.0-8.4V window) -- nothing else changes.
+cells = 3
+empty_volts_per_cell = 3.0
+full_volts_per_cell = 4.2
+
+# Pack internal resistance, used to recover open-circuit voltage from the loaded bus voltage:
+#   V_oc = V_bus - (I * R)
+# Charging current is positive so it subtracts; discharge current is negative so it adds back. This
+# is what stops the reported percentage jumping when the charger cuts in or out.
+#
+# THE ONE VALUE WORTH TUNING. 0.20 suits 3x 18650 in series plus wiring. If the percentage still
+# jumps when a big load starts, raise it; if it jumps the other way, lower it.
+internal_resistance_ohms = 0.20
+
+# EMA smoothing on the compensated voltage. 1.0 = no smoothing, lower = steadier but slower.
+ema_alpha = 0.2
+
+[mqtt]
+host = "mqtt.local"
+port = 1883
+# username = "ups"
+# password = "secret"
+base_topic = "waveshare-ups"
+discovery_prefix = "homeassistant"
+# device_id defaults to the hostname; it namespaces topics and entity unique_ids.
+# device_id = "pi"
+keep_alive_secs = 30
+
+[monitor]
+poll_interval_secs = 2
+
+# Current deadband, in mA. Above +50mA is charging; below -50mA is discharging.
+#
+# Note "external power present" means NOT discharging, rather than "charging". A full pack on mains
+# tapers its charge current to nearly zero, so testing for charging would report mains-lost on a
+# healthy UPS and fire the power hooks spuriously.
+charging_threshold_ma = 50.0
+discharging_threshold_ma = 50.0
+
+# Consecutive readings required before a hook state change is accepted. At 2s polling, 3 cycles is
+# ~6s of confirmation, which rejects one-off sensor noise.
+confirm_cycles = 3
+
+[hooks]
+low_threshold_pct = 20.0
+critical_threshold_pct = 5.0
+
+# Recovery must clear threshold + hysteresis, so a battery sitting at exactly 20% does not flap
+# services up and down. Here: drops below 20% -> low; must reach 25% to clear.
+hysteresis_pct = 5.0
+
+# Hook scripts are killed if they exceed this.
+timeout_secs = 60
+
+# false: the first reading latches state silently, so restarting the daemon never tears down
+#        services that are already in the right state.
+# true:  every latch fires on the first reading to sync the world to reality -- including the
+#        nominal ones, so booting on mains at a healthy charge runs on_power_restored AND
+#        on_battery_ok. Scripts must be idempotent.
+fire_on_startup = false
+
+# All optional; unset means no action for that event.
+on_battery_low = "/etc/waveshare-ups/hooks/battery-low.sh"
+on_battery_ok = "/etc/waveshare-ups/hooks/battery-ok.sh"
+on_battery_critical = "/etc/waveshare-ups/hooks/battery-critical.sh"
+# on_battery_critical_clear = "/etc/waveshare-ups/hooks/battery-critical-clear.sh"
+on_power_lost = "/etc/waveshare-ups/hooks/power-lost.sh"
+on_power_restored = "/etc/waveshare-ups/hooks/power-restored.sh"
