@@ -195,18 +195,36 @@ bare hostname is a poor key there — another integration on the same host publi
 `homeassistant/sensor/<hostname>/battery/config` would hit the identical topic and silently clobber
 ours.
 
+`device_id` is also **slugified** to `[a-zA-Z0-9_-]`, which Home Assistant requires for the `node_id`
+and `object_id` levels of a discovery topic:
+
+```
+<discovery_prefix>/<component>/[<node_id>/]<object_id>/config
+```
+
+HA rejects a non-conforming config outright, and the entity simply never appears — with no obvious
+error. A dotted hostname is the usual way to hit this, so `raspberrypi.local` becomes
+`waveshare-ups-raspberrypi-local`. Slugifying applies to a configured `mqtt.device_id` too; one that
+contains nothing usable is rejected at startup rather than silently renamed.
+
+Note the dots are replaced rather than truncated at. `raspberrypi.local` → `raspberrypi` looks
+tidier, but `pi.a.example` and `pi.b.example` would both collapse to `pi` and collide — exactly what
+this scheme exists to prevent.
+
+For a host called `raspberrypi.local`:
+
 | | Value | Prefixed? |
 |---|---|---|
-| Discovery topic | `homeassistant/sensor/waveshare-ups-pi/battery/config` | yes — shared keyspace |
-| Entity `unique_id` | `waveshare-ups-pi_battery` | yes — shared keyspace |
-| MQTT client id | `waveshare-ups-pi` | yes — shared keyspace |
-| Device identifier | `waveshare_ups_pi` | already namespaced |
-| State topic | `waveshare-ups/pi/state` | already under `base_topic` |
-| Device name | `Waveshare UPS (pi)` | display only |
+| Discovery topic | `homeassistant/sensor/waveshare-ups-raspberrypi-local/battery/config` | yes — shared keyspace |
+| Entity `unique_id` | `waveshare-ups-raspberrypi-local_battery` | yes — shared keyspace |
+| MQTT client id | `waveshare-ups-raspberrypi-local` | yes — shared keyspace |
+| Device identifier | `waveshare_ups_raspberrypi-local` | already namespaced |
+| State topic | `waveshare-ups/raspberrypi-local/state` | already under `base_topic` |
+| Device name | `Waveshare UPS (raspberrypi-local)` | display only |
 
 The prefix applies whether `device_id` is derived from the hostname or set explicitly — it namespaces
 this integration, not the hostname specifically. Our own topics keep the bare `device_id` rather than
-stuttering into `waveshare-ups/waveshare-ups-pi/state`.
+stuttering into `waveshare-ups/waveshare-ups-raspberrypi-local/state`.
 
 ## Tuning
 

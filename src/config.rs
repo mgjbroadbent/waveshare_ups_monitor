@@ -144,6 +144,14 @@ impl Config {
             "battery.ema_alpha must be in (0, 1]"
         );
         anyhow::ensure!(!self.mqtt.host.is_empty(), "mqtt.host must be set");
+        if let Some(id) = &self.mqtt.device_id {
+            // Better to fail at startup than to publish under a name the user never chose.
+            anyhow::ensure!(
+                !slugify(id).is_empty(),
+                "mqtt.device_id ({id:?}) contains no characters usable in an MQTT discovery topic; \
+                 it must have at least one of [a-zA-Z0-9_]"
+            );
+        }
         anyhow::ensure!(
             self.monitor.poll_interval_secs > 0,
             "monitor.poll_interval_secs must be > 0"
@@ -160,12 +168,26 @@ impl Config {
         Ok(())
     }
 
+    /// Slugified machine identity: the configured `mqtt.device_id`, else the hostname.
+    ///
+    /// Slugified because it feeds the `node_id` level of the discovery topic, and Home Assistant
+    /// requires `[a-zA-Z0-9_-]` there -- a hostname like `raspberrypi.local` would otherwise be
+    /// rejected outright, and the entity would silently never appear.
     pub fn device_id(&self) -> String {
-        self.mqtt.device_id.clone().unwrap_or_else(|| {
-            let host = gethostname::gethostname().to_string_lossy().to_string();
-            // Topic-safe: MQTT tolerates most things but '/' and '+' would break topic structure.
-            host.replace(['/', '+', '#'], "-")
-        })
+        let raw = self
+            .mqtt
+            .device_id
+            .clone()
+            .unwrap_or_else(|| gethostname::gethostname().to_string_lossy().to_string());
+
+        let slug = slugify(&raw);
+        if slug.is_empty() {
+            // Only reachable via a hostname with nothing slug-worthy in it; an explicit device_id
+            // that slugs to nothing is rejected by validate() instead of silently landing here.
+            tracing::warn!("hostname {raw:?} has no usable characters; falling back to \"ups\"");
+            return "ups".to_string();
+        }
+        slug
     }
 
     pub fn empty_volts(&self) -> f64 {
@@ -175,6 +197,34 @@ impl Config {
     pub fn full_volts(&self) -> f64 {
         self.battery.full_volts_per_cell * self.battery.cells
     }
+}
+
+/// Conform a string to Home Assistant's `[a-zA-Z0-9_-]` requirement for the `node_id` and
+/// `object_id` levels of a discovery topic:
+///
+/// ```text
+/// <discovery_prefix>/<component>/[<node_id>/]<object_id>/config
+/// ```
+///
+/// Anything outside the class becomes `-`, runs collapse, and leading/trailing `-` are trimmed.
+///
+/// Deliberately does not truncate at the first dot, tempting though `raspberrypi.local` ->
+/// `raspberrypi` looks: `pi.a.example` and `pi.b.example` would both collapse to `pi` and collide,
+/// which is precisely what this naming scheme exists to prevent. Slugifying whole keeps every host
+/// distinct.
+///
+/// Case is preserved, since the character class permits `A-Z`.
+fn slugify(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for c in input.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            // Collapses runs: `a...b` -> `a-b`, not `a---b`.
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_string()
 }
 
 fn default_bus() -> u8 {
@@ -310,5 +360,90 @@ mod tests {
     fn rejects_typo_keys_rather_than_silently_ignoring() {
         // deny_unknown_fields: a misspelled threshold must not silently keep the default.
         assert!(parse("[mqtt]\nhost = \"b\"\n[hooks]\nlow_threshold = 20.0\n").is_err());
+    }
+
+    /// Home Assistant requires [a-zA-Z0-9_-] for the node_id and object_id levels of a discovery
+    /// topic and rejects the config outright otherwise -- the entity simply never appears, with no
+    /// obvious error. A dotted hostname is the common way to trip this.
+    #[test]
+    fn slugify_strips_characters_home_assistant_rejects() {
+        assert_eq!(slugify("raspberrypi.local"), "raspberrypi-local");
+        assert_eq!(slugify("pi.home.arpa"), "pi-home-arpa");
+        assert_eq!(slugify("Marks-MacBook-Pro.local"), "Marks-MacBook-Pro-local");
+    }
+
+    #[test]
+    fn slugify_leaves_already_valid_names_untouched() {
+        assert_eq!(slugify("raspberrypi"), "raspberrypi");
+        assert_eq!(slugify("pi_2"), "pi_2");
+        assert_eq!(slugify("ups-01"), "ups-01");
+        assert_eq!(slugify("UPPER_case-99"), "UPPER_case-99");
+    }
+
+    #[test]
+    fn slugify_collapses_runs_and_trims_edges() {
+        assert_eq!(slugify("a...b"), "a-b");
+        assert_eq!(slugify("--pi--"), "pi");
+        assert_eq!(slugify(".pi."), "pi");
+        assert_eq!(slugify("a b  c"), "a-b-c");
+    }
+
+    #[test]
+    fn slugify_handles_non_ascii_and_topic_wildcards() {
+        // MQTT wildcards and separators would break topic structure; non-ASCII is outside the class.
+        assert_eq!(slugify("pi/2+3#4"), "pi-2-3-4");
+        assert_eq!(slugify("café"), "caf");
+        assert_eq!(slugify("日本"), "");
+    }
+
+    #[test]
+    fn slugify_output_always_conforms_to_the_home_assistant_class() {
+        for input in [
+            "raspberrypi.local",
+            "pi/2+3#4",
+            "café",
+            "a...b",
+            "--x--",
+            "UPPER.case",
+            "1.2.3.4",
+        ] {
+            let s = slugify(input);
+            assert!(
+                s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+                "slugify({input:?}) = {s:?} escaped the character class"
+            );
+        }
+    }
+
+    #[test]
+    fn slugify_does_not_truncate_at_dots_so_hosts_stay_distinct() {
+        // Truncating to the short hostname would collapse these two into the same id.
+        assert_ne!(slugify("pi.a.example"), slugify("pi.b.example"));
+    }
+
+    #[test]
+    fn device_id_slugifies_an_explicitly_configured_value() {
+        // Previously the configured value bypassed sanitising entirely.
+        let c = parse("[mqtt]\nhost = \"b\"\ndevice_id = \"shed.ups\"\n").unwrap();
+        assert_eq!(c.device_id(), "shed-ups");
+    }
+
+    #[test]
+    fn rejects_a_device_id_with_nothing_sluggable_in_it() {
+        let err = parse("[mqtt]\nhost = \"b\"\ndevice_id = \"...\"\n").unwrap_err();
+        assert!(err.to_string().contains("no characters usable"));
+    }
+
+    #[test]
+    fn device_id_from_hostname_is_always_valid() {
+        let c = parse("[mqtt]\nhost = \"b\"\n").unwrap();
+        let id = c.device_id();
+        assert!(!id.is_empty());
+        assert!(
+            id.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+            "hostname-derived device_id {id:?} is not discovery-safe"
+        );
     }
 }

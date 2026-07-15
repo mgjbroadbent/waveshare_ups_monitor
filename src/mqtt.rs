@@ -414,12 +414,55 @@ mod tests {
         assert!(!p.external_power);
     }
 
+    fn is_discovery_safe(s: &str) -> bool {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    }
+
+    /// HA requires [a-zA-Z0-9_-] for both the node_id and object_id levels of
+    /// `<discovery_prefix>/<component>/[<node_id>/]<object_id>/config`, and rejects the config
+    /// silently otherwise. Covers every level of the topic we construct.
     #[test]
-    fn device_id_falls_back_to_hostname() {
+    fn every_discovery_topic_level_conforms_to_the_required_character_class() {
+        let t = Topics::new(&config());
+        assert!(is_discovery_safe(&t.node_id), "node_id {:?}", t.node_id);
+
+        for e in ENTITIES {
+            assert!(is_discovery_safe(e.object), "object_id {:?}", e.object);
+            assert!(is_discovery_safe(e.component), "component {:?}", e.component);
+        }
+    }
+
+    #[test]
+    fn a_dotted_hostname_produces_a_valid_node_id() {
+        // The bug this guards: `raspberrypi.local` used to reach the topic verbatim, and HA
+        // dropped the entity without complaint.
+        let c: Config = toml::from_str("[mqtt]\nhost = \"b\"\ndevice_id = \"raspberrypi.local\"\n")
+            .unwrap();
+        let t = Topics::new(&c);
+
+        assert_eq!(t.node_id, "waveshare-ups-raspberrypi-local");
+        assert_eq!(
+            t.discovery("sensor", "battery"),
+            "homeassistant/sensor/waveshare-ups-raspberrypi-local/battery/config"
+        );
+        assert!(is_discovery_safe(&t.node_id));
+    }
+
+    #[test]
+    fn unique_ids_match_the_slugified_node_id() {
+        let c: Config = toml::from_str("[mqtt]\nhost = \"b\"\ndevice_id = \"raspberrypi.local\"\n")
+            .unwrap();
+        let t = Topics::new(&c);
+        let p = discovery_payload(&ENTITIES[3], &t); // battery
+        assert_eq!(p["unique_id"], "waveshare-ups-raspberrypi-local_battery");
+    }
+
+    #[test]
+    fn device_id_falls_back_to_hostname_and_stays_discovery_safe() {
         let c: Config = toml::from_str("[mqtt]\nhost = \"b\"\n").unwrap();
-        let id = c.device_id();
-        assert!(!id.is_empty());
-        // Must stay topic-safe or the topic structure breaks.
-        assert!(!id.contains('/') && !id.contains('+') && !id.contains('#'));
+        assert!(is_discovery_safe(&c.device_id()));
+        assert!(is_discovery_safe(&Topics::new(&c).node_id));
     }
 }
