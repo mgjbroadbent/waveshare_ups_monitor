@@ -228,10 +228,27 @@ mod tests {
 
     #[test]
     fn small_currents_inside_the_deadband_are_neither_charging_nor_discharging() {
-        // +/-50mA default deadband keeps sensor noise from flapping the state.
+        // +50/-200mA default deadband keeps sensor noise from flapping the state.
         let r = bare_monitor().evaluate(sample(11.5, -0.02));
         assert!(!r.charging);
         assert!(r.external_power, "noise must not read as mains lost");
+    }
+
+    /// The deadband is asymmetric for a measured reason, so pin both sides of the gap it straddles.
+    /// A full pack on mains briefly hands the load back to the pack; a symmetric +/-50mA deadband
+    /// called that mains loss and fired the power hooks. See README.
+    #[test]
+    fn the_default_deadband_spans_the_gap_between_an_idle_excursion_and_a_real_loss() {
+        // Worst observed idle excursion: -177mA, ~1W, pack voltage flat.
+        let r = bare_monitor().evaluate(sample(12.44, -0.177));
+        assert!(
+            r.external_power,
+            "the idle excursion must not read as mains lost"
+        );
+
+        // Weakest observed genuine loss: -360mA, the Pi's whole draw on the pack.
+        let r = bare_monitor().evaluate(sample(12.388, -0.360));
+        assert!(!r.external_power, "a real dropout must still be detected");
     }
 
     #[test]

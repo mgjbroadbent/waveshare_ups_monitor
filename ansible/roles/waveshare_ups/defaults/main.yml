@@ -65,7 +65,9 @@ waveshare_ups_mqtt_keep_alive_secs: 30
 # --- [monitor] ---------------------------------------------------------------------
 waveshare_ups_poll_interval_secs: 2
 waveshare_ups_charging_threshold_ma: 50.0
-waveshare_ups_discharging_threshold_ma: 50.0
+# Not symmetric: a full pack on mains briefly hands the load back to the pack (~1W, spiking
+# to 177mA), which at 50mA reads as mains loss. A real loss draws ~400mA. See the README.
+waveshare_ups_discharging_threshold_ma: 200.0
 waveshare_ups_confirm_cycles: 3
 
 # --- [hooks] -----------------------------------------------------------------------

@@ -54,6 +54,29 @@ test is the negative one:
 - `discharging` = `current < −discharging_threshold_ma`
 - `external_power` = `!discharging` ← idle or full-on-mains correctly reads as powered
 
+### Why the discharge threshold is 200 mA
+
+The thresholds are deliberately asymmetric, because two logged events on the same hardware look
+nothing alike:
+
+| | Idle excursion on mains | Genuine mains loss |
+|---|---|---|
+| Current | −50 to −90 mA, one −177 mA spike | −360 to −440 mA from the first sample |
+| Power | ~1 W | ~5 W — the Pi's whole draw |
+| Compensated `oc_v` | flat: 12.484 → 12.477 | falling: 12.484 → 12.454 |
+| Battery % | 100.0 throughout | 100.0 → 99.4 |
+| Pattern | flaps across the threshold, gone in ~12 s | every sample, until mains returned |
+
+A full pack on mains periodically hands the load back to the pack for a few seconds — a small
+*discharge* (current is negative), not a charge. At `discharging_threshold_ma = 50` that reads as
+mains loss: the excursion delivers exactly the three consecutive samples `confirm_cycles` demands,
+fires `power_lost`, then flaps back and fires `power_restored` ~16 s later.
+
+**200 mA sits in the empty gap** — clear of the 177 mA spike, well under the 360 mA floor of a real
+loss. Debouncing harder doesn't help; `confirm_cycles` buys time, not discrimination, and delays real
+detection by the same amount. Lower the threshold only if your Pi draws much less than ~5 W, sizing
+it against your own idle log.
+
 ## Build
 
 ### On the Pi
@@ -247,7 +270,7 @@ The daemon runs on Linux, but the code builds and tests on macOS: the I2C HAL is
 a `UpsSensor` trait, and `--simulate` swaps in a battery ramp.
 
 ```sh
-cargo test                                     # 49 tests, no hardware needed
+cargo test                                     # 72 tests, no hardware needed
 cargo check --target aarch64-unknown-linux-gnu # type-check the deploy target (does NOT link)
 ```
 

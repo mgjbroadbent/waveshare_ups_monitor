@@ -39,13 +39,18 @@ keep_alive_secs = 30
 [monitor]
 poll_interval_secs = 2
 
-# Current deadband, in mA. Above +50mA is charging; below -50mA is discharging.
+# Current deadband, in mA. Above +50mA is charging; below -200mA is discharging.
 #
 # Note "external power present" means NOT discharging, rather than "charging". A full pack on mains
 # tapers its charge current to nearly zero, so testing for charging would report mains-lost on a
 # healthy UPS and fire the power hooks spuriously.
 charging_threshold_ma = 50.0
-discharging_threshold_ma = 50.0
+
+# Not symmetric with the charge threshold, and measured rather than guessed. A full pack on mains
+# briefly hands the load back to the pack every so often, drawing ~1W (50-90mA, spiking to 177mA);
+# at 50mA that reads as mains loss. A real loss puts the Pi's whole draw on the pack, ~400mA. 200mA
+# sits in the empty gap between the two. Lower it only if your Pi draws much less than ~5W.
+discharging_threshold_ma = 200.0
 
 # Consecutive readings required before a hook state change is accepted. At 2s polling, 3 cycles is
 # ~6s of confirmation, which rejects one-off sensor noise.

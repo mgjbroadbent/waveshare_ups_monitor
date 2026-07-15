@@ -78,7 +78,7 @@ pub struct MonitorConfig {
     #[serde(default = "default_charge_threshold")]
     pub charging_threshold_ma: f64,
     /// Below negative this, we are discharging (and therefore on battery).
-    #[serde(default = "default_charge_threshold")]
+    #[serde(default = "default_discharge_threshold")]
     pub discharging_threshold_ma: f64,
     /// Consecutive readings required before a hook state change is accepted.
     #[serde(default = "default_confirm_cycles")]
@@ -266,6 +266,12 @@ fn default_poll_interval() -> u64 {
 fn default_charge_threshold() -> f64 {
     50.0
 }
+/// Deliberately not symmetric with the charge threshold: a full pack on mains briefly hands the load
+/// back to the pack, drawing ~1W (50-90mA, spiking to 177mA). At 50mA that reads as mains loss. A
+/// genuine loss puts the Pi's whole draw on the pack -- ~400mA -- so 200mA sits in the empty gap.
+fn default_discharge_threshold() -> f64 {
+    200.0
+}
 fn default_confirm_cycles() -> u32 {
     3
 }
@@ -308,7 +314,7 @@ impl Default for MonitorConfig {
         Self {
             poll_interval_secs: default_poll_interval(),
             charging_threshold_ma: default_charge_threshold(),
-            discharging_threshold_ma: default_charge_threshold(),
+            discharging_threshold_ma: default_discharge_threshold(),
             confirm_cycles: default_confirm_cycles(),
         }
     }
