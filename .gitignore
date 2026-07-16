@@ -3,3 +3,4 @@
 # Waveshare's vendor driver, kept locally as porting reference. Not ours to redistribute:
 # https://www.waveshare.com/wiki/UPS_Module_3S
 /INA219.py
+ansible/roles/waveshare_ups/files/waveshare-ups

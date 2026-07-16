@@ -56,6 +56,7 @@
         quiet: true
 
 - name: Install the executable
+  become: yes
   ansible.builtin.copy:
     src: "{{ _waveshare_ups_binary_resolved }}"
     dest: "{{ waveshare_ups_binary_path }}"
@@ -72,6 +73,7 @@
   when: not ansible_check_mode
 
 - name: Create the config directory
+  become: yes
   ansible.builtin.file:
     path: "{{ waveshare_ups_config_dir }}"
     state: directory
@@ -80,6 +82,7 @@
     mode: "0755"
 
 - name: Install the hook scripts
+  become: yes
   ansible.builtin.copy:
     src: "{{ waveshare_ups_hooks_src }}/"
     dest: "{{ waveshare_ups_config_dir }}/hooks/"
@@ -92,6 +95,7 @@
 
 # 0600 because this file can hold the MQTT password.
 - name: Install the configuration
+  become: yes
   ansible.builtin.template:
     src: config.toml.j2
     dest: "{{ waveshare_ups_config_path }}"
@@ -101,6 +105,7 @@
   notify: Restart waveshare-ups
 
 - name: Install the systemd unit
+  become: yes
   ansible.builtin.template:
     src: waveshare-ups.service.j2
     dest: /etc/systemd/system/{{ waveshare_ups_service_name }}.service
@@ -112,6 +117,7 @@
     - Restart waveshare-ups
 
 - name: Enable and start the service
+  become: yes
   ansible.builtin.systemd:
     name: "{{ waveshare_ups_service_name }}"
     enabled: "{{ waveshare_ups_service_enabled | bool }}"
