@@ -1,63 +1,29 @@
 name: Release
 
-# Fires only for version tags of the form vX.Y.Z (e.g. v1.2.3). The pattern is a
-# glob, not a regex, so it also matches things like v1.2.3.4 -- the guard job
-# below rejects anything that is not exactly three numeric components.
+# Triggered by a published GitHub Release. The idiomatic GitHub flow is to
+# create the release -- which creates its tag as part of the flow -- from the UI
+# or API; this workflow then builds the binary and attaches it to that release.
+# `published` fires for releases published from a draft, unlike `created` or
+# `prereleased`, so it is the reliable trigger for asset-building automation.
 on:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+  release:
+    types: [published]
 
-# Needed to create the GitHub Release and upload the built asset.
+# Needed to upload the built asset onto the release.
 permissions:
   contents: write
 
 jobs:
-  # Refuse to proceed if a release for this tag already exists, so re-pushing a
-  # version can never silently replace a published one.
-  guard:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - name: Validate tag format
-        run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Tag '${GITHUB_REF_NAME}' is not a vX.Y.Z version." >&2
-            exit 1
-          fi
-
-      - uses: actions/checkout@v7
-
-      - name: Verify Cargo.toml version matches the tag
-        run: |
-          # Read the version from the [package] table only, so a `version` key
-          # under [dependencies] can never be picked up by mistake.
-          cargo_version="$(awk -F' *= *' '
-            /^\[/ { in_pkg = ($0 == "[package]") }
-            in_pkg && $1 == "version" { gsub(/"/, "", $2); print $2; exit }
-          ' Cargo.toml)"
-          tag_version="${GITHUB_REF_NAME#v}"
-          if [[ "${cargo_version}" != "${tag_version}" ]]; then
-            echo "Cargo.toml version (${cargo_version}) does not match tag (${tag_version})." >&2
-            exit 1
-          fi
-          echo "Cargo.toml version matches tag: ${tag_version}"
-
-      - name: Fail if a release already exists for this version
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "Release ${GITHUB_REF_NAME} already exists; refusing to overwrite." >&2
-            exit 1
-          fi
-          echo "No existing release for ${GITHUB_REF_NAME}; proceeding."
-
-  release:
-    needs: guard
+  build-and-upload:
     # Native Linux aarch64 runner, matching the CI build target.
     runs-on: ubuntu-24.04-arm
+    env:
+      TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Build the exact commit the release tag points at.
+          ref: ${{ github.event.release.tag_name }}
 
       - name: Install the latest stable Rust
         run: |
@@ -73,14 +39,13 @@ jobs:
       - name: Stage the executable
         run: |
           install -Dm755 target/release/waveshare-ups \
-            "dist/waveshare-ups-${GITHUB_REF_NAME}-linux-aarch64"
+            "dist/waveshare-ups-${TAG}-linux-aarch64"
 
-      - name: Create the release and upload the executable
+      - name: Attach the executable to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
+          gh release upload "${TAG}" \
+            "dist/waveshare-ups-${TAG}-linux-aarch64" \
             --repo "${GITHUB_REPOSITORY}" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            "dist/waveshare-ups-${GITHUB_REF_NAME}-linux-aarch64"
+            --clobber
