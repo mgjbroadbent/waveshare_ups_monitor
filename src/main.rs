@@ -21,7 +21,10 @@ use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
-#[command(version, about = "Waveshare UPS monitor: MQTT reporting and battery threshold hooks")]
+#[command(
+    version,
+    about = "Waveshare UPS monitor: MQTT reporting and battery threshold hooks"
+)]
 struct Cli {
     #[arg(short, long, default_value = "/etc/waveshare-ups/config.toml")]
     config: PathBuf,
@@ -262,7 +265,7 @@ fn build_sensor(config: &Config, simulate: bool) -> Result<Box<dyn sensor::UpsSe
 async fn wait_for_signal() {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         let mut term = match signal(SignalKind::terminate()) {
             Ok(s) => s,
             Err(e) => {

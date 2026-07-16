@@ -1,0 +1,46 @@
+name: CI
+
+# Build and test every pushed change. Pull requests are covered too so the same
+# checks gate merges.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same ref supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    # Native Linux aarch64 runner -- the I2C linux-embedded-hal dependency is
+    # Linux-only, and building on ARM avoids any cross-compilation.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the latest stable Rust
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup component add rustfmt clippy
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy (advisory)
+        # Advisory only: lint findings are surfaced but do not fail the build.
+        continue-on-error: true
+        run: cargo clippy --locked --all-targets
+
+      - name: Build
+        run: cargo build --locked --verbose
+
+      - name: Test
+        run: cargo test --locked --verbose

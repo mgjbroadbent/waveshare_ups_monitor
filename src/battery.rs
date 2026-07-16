@@ -69,8 +69,8 @@ impl Monitor {
         self.ema_v = Some(smoothed);
 
         // INA219.py:287, applied to the compensated voltage.
-        let battery_pct = ((smoothed - self.empty_v) / (self.full_v - self.empty_v) * 100.0)
-            .clamp(0.0, 100.0);
+        let battery_pct =
+            ((smoothed - self.empty_v) / (self.full_v - self.empty_v) * 100.0).clamp(0.0, 100.0);
 
         let charging = sample.current_a > self.charging_threshold_a;
         let discharging = sample.current_a < -self.discharging_threshold_a;
@@ -133,14 +133,20 @@ mod tests {
             let v = f64::from(mv) / 1000.0;
             let expected = ((v - 9.0) / 3.6 * 100.0).clamp(0.0, 100.0);
             let got = bare_monitor().evaluate(sample(v, 0.0)).battery_pct;
-            assert!((got - expected).abs() < 1e-6, "at {v}V: {got} vs {expected}");
+            assert!(
+                (got - expected).abs() < 1e-6,
+                "at {v}V: {got} vs {expected}"
+            );
         }
     }
 
     #[test]
     fn soc_clamps_outside_the_window() {
         assert_eq!(bare_monitor().evaluate(sample(5.0, 0.0)).battery_pct, 0.0);
-        assert_eq!(bare_monitor().evaluate(sample(20.0, 0.0)).battery_pct, 100.0);
+        assert_eq!(
+            bare_monitor().evaluate(sample(20.0, 0.0)).battery_pct,
+            100.0
+        );
     }
 
     #[test]
@@ -174,7 +180,10 @@ mod tests {
             "got {}",
             r.compensated_voltage_v
         );
-        assert!(r.compensated_voltage_v > 11.0, "discharging must read higher");
+        assert!(
+            r.compensated_voltage_v > 11.0,
+            "discharging must read higher"
+        );
     }
 
     #[test]
@@ -209,7 +218,10 @@ mod tests {
         // tapers to ~0, and `current > 50mA` would call that mains-lost and fire the hooks.
         let r = bare_monitor().evaluate(sample(12.6, 0.001));
         assert!(!r.charging, "1mA is below the charge threshold");
-        assert!(r.external_power, "must not report mains lost when merely idle");
+        assert!(
+            r.external_power,
+            "must not report mains lost when merely idle"
+        );
     }
 
     #[test]
@@ -295,6 +307,9 @@ mod tests {
             m.evaluate(sample(12.0, 0.0));
         }
         let spiked = m.evaluate(sample(0.0, 0.0)).compensated_voltage_v;
-        assert!(spiked > 9.0, "one bad sample must not read as empty: {spiked}");
+        assert!(
+            spiked > 9.0,
+            "one bad sample must not read as empty: {spiked}"
+        );
     }
 }

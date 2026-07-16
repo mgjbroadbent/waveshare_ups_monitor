@@ -130,7 +130,10 @@ impl HookMachine {
 
         let mut events = Vec::new();
 
-        if let Some(lost) = self.power.update(!reading.external_power, self.confirm_cycles) {
+        if let Some(lost) = self
+            .power
+            .update(!reading.external_power, self.confirm_cycles)
+        {
             events.push(if lost {
                 Event::PowerLost
             } else {
@@ -141,11 +144,19 @@ impl HookMachine {
         // Emits nothing; kept in step purely so `reported` has a debounced value to hand out.
         self.charging.update(reading.charging, self.confirm_cycles);
 
-        let low_now = Self::trip(self.low.tripped, reading.battery_pct, self.low_threshold, self.hysteresis);
-        let low_event = self
-            .low
-            .update(low_now, self.confirm_cycles)
-            .map(|t| if t { Event::BatteryLow } else { Event::BatteryOk });
+        let low_now = Self::trip(
+            self.low.tripped,
+            reading.battery_pct,
+            self.low_threshold,
+            self.hysteresis,
+        );
+        let low_event = self.low.update(low_now, self.confirm_cycles).map(|t| {
+            if t {
+                Event::BatteryLow
+            } else {
+                Event::BatteryOk
+            }
+        });
 
         let crit_now = Self::trip(
             self.critical.tripped,
@@ -276,11 +287,7 @@ async fn run_one(script: &Path, event: Event, reading: &Reading, timeout_secs: u
 }
 
 fn bool_env(v: bool) -> &'static str {
-    if v {
-        "1"
-    } else {
-        "0"
-    }
+    if v { "1" } else { "0" }
 }
 
 #[cfg(test)]
@@ -288,8 +295,10 @@ mod tests {
     use super::*;
 
     fn hooks_cfg() -> HooksConfig {
-        toml::from_str("low_threshold_pct = 20.0\ncritical_threshold_pct = 5.0\nhysteresis_pct = 5.0\n")
-            .unwrap()
+        toml::from_str(
+            "low_threshold_pct = 20.0\ncritical_threshold_pct = 5.0\nhysteresis_pct = 5.0\n",
+        )
+        .unwrap()
     }
 
     fn reading(pct: f64) -> Reading {
@@ -342,7 +351,11 @@ mod tests {
         let mut m = HookMachine::new(&cfg, 1);
         assert_eq!(
             m.update(&reading_with_power(2.0, true)),
-            vec![Event::PowerRestored, Event::BatteryLow, Event::BatteryCritical]
+            vec![
+                Event::PowerRestored,
+                Event::BatteryLow,
+                Event::BatteryCritical
+            ]
         );
     }
 
@@ -353,7 +366,11 @@ mod tests {
         let mut m = HookMachine::new(&cfg, 1);
         assert_eq!(
             m.update(&reading_with_power(90.0, false)),
-            vec![Event::PowerLost, Event::BatteryCriticalClear, Event::BatteryOk]
+            vec![
+                Event::PowerLost,
+                Event::BatteryCriticalClear,
+                Event::BatteryOk
+            ]
         );
     }
 
@@ -492,7 +509,11 @@ mod tests {
         m.update(&reading_with_power(90.0, true));
 
         let dropout = reading_with_power(90.0, false);
-        assert_eq!(m.update(&dropout), vec![], "one sample must not fire a hook");
+        assert_eq!(
+            m.update(&dropout),
+            vec![],
+            "one sample must not fire a hook"
+        );
         assert!(
             m.reported(&dropout).external_power,
             "and must not be reported either -- the raw reading says false"
@@ -529,7 +550,10 @@ mod tests {
         // A single tick where the charge current dips inside the deadband.
         let dip = reading_with(90.0, true, false);
         m.update(&dip);
-        assert!(m.reported(&dip).charging, "one sample must not flap charging");
+        assert!(
+            m.reported(&dip).charging,
+            "one sample must not flap charging"
+        );
 
         // Sustained: the charger has genuinely tapered off.
         for _ in 0..2 {

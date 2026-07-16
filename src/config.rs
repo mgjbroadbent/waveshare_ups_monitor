@@ -119,8 +119,8 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("reading config {}", path.display()))?;
-        let config: Config = toml::from_str(&raw)
-            .with_context(|| format!("parsing config {}", path.display()))?;
+        let config: Config =
+            toml::from_str(&raw).with_context(|| format!("parsing config {}", path.display()))?;
         config.validate()?;
         Ok(config)
     }
@@ -375,7 +375,10 @@ mod tests {
     fn slugify_strips_characters_home_assistant_rejects() {
         assert_eq!(slugify("raspberrypi.local"), "raspberrypi-local");
         assert_eq!(slugify("pi.home.arpa"), "pi-home-arpa");
-        assert_eq!(slugify("Marks-MacBook-Pro.local"), "Marks-MacBook-Pro-local");
+        assert_eq!(
+            slugify("Marks-MacBook-Pro.local"),
+            "Marks-MacBook-Pro-local"
+        );
     }
 
     #[test]

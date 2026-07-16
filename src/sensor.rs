@@ -146,9 +146,9 @@ pub use linux::LinuxSensor;
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
-    use anyhow::{anyhow, Context};
-    use ina219::address::Address;
+    use anyhow::{Context, anyhow};
     use ina219::SyncIna219;
+    use ina219::address::Address;
     use linux_embedded_hal::I2cdev;
 
     type Device = SyncIna219<I2cdev, WaveshareUps3S>;
@@ -291,7 +291,10 @@ mod tests {
             -WaveshareUps3S::CURRENT_LSB_MA / 1000.0,
             "0xFFFF must be exactly -1 LSB"
         );
-        assert_eq!(WaveshareUps3S.current_from_register(CurrentRegister(0)), 0.0);
+        assert_eq!(
+            WaveshareUps3S.current_from_register(CurrentRegister(0)),
+            0.0
+        );
     }
 
     #[test]
@@ -332,6 +335,9 @@ mod tests {
 
         assert!(min <= 9.0, "should ramp to/below empty, got {min}");
         assert!(max >= 12.6, "should ramp to/above full, got {max}");
-        assert!(saw_charge && saw_discharge, "should exercise both directions");
+        assert!(
+            saw_charge && saw_discharge,
+            "should exercise both directions"
+        );
     }
 }

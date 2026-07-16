@@ -221,7 +221,11 @@ pub async fn publish_discovery(client: &AsyncClient, topics: &Topics) -> Result<
     Ok(())
 }
 
-pub async fn publish_availability(client: &AsyncClient, topics: &Topics, value: &str) -> Result<()> {
+pub async fn publish_availability(
+    client: &AsyncClient,
+    topics: &Topics,
+    value: &str,
+) -> Result<()> {
     client
         .publish(&topics.availability, QoS::AtLeastOnce, true, value)
         .await?;
@@ -366,7 +370,11 @@ mod tests {
         let t = Topics::new(&config());
         for e in ENTITIES.iter().filter(|e| e.component == "binary_sensor") {
             let p = discovery_payload(e, &t);
-            assert!(p.get("state_class").is_none(), "{} has state_class", e.object);
+            assert!(
+                p.get("state_class").is_none(),
+                "{} has state_class",
+                e.object
+            );
             assert!(p.get("unit_of_measurement").is_none());
             assert_eq!(p["payload_on"], "ON");
             assert_eq!(p["payload_off"], "OFF");
@@ -430,7 +438,11 @@ mod tests {
 
         for e in ENTITIES {
             assert!(is_discovery_safe(e.object), "object_id {:?}", e.object);
-            assert!(is_discovery_safe(e.component), "component {:?}", e.component);
+            assert!(
+                is_discovery_safe(e.component),
+                "component {:?}",
+                e.component
+            );
         }
     }
 
@@ -438,8 +450,8 @@ mod tests {
     fn a_dotted_hostname_produces_a_valid_node_id() {
         // The bug this guards: `raspberrypi.local` used to reach the topic verbatim, and HA
         // dropped the entity without complaint.
-        let c: Config = toml::from_str("[mqtt]\nhost = \"b\"\ndevice_id = \"raspberrypi.local\"\n")
-            .unwrap();
+        let c: Config =
+            toml::from_str("[mqtt]\nhost = \"b\"\ndevice_id = \"raspberrypi.local\"\n").unwrap();
         let t = Topics::new(&c);
 
         assert_eq!(t.node_id, "waveshare-ups-raspberrypi-local");
@@ -452,8 +464,8 @@ mod tests {
 
     #[test]
     fn unique_ids_match_the_slugified_node_id() {
-        let c: Config = toml::from_str("[mqtt]\nhost = \"b\"\ndevice_id = \"raspberrypi.local\"\n")
-            .unwrap();
+        let c: Config =
+            toml::from_str("[mqtt]\nhost = \"b\"\ndevice_id = \"raspberrypi.local\"\n").unwrap();
         let t = Topics::new(&c);
         let p = discovery_payload(&ENTITIES[3], &t); // battery
         assert_eq!(p["unique_id"], "waveshare-ups-raspberrypi-local_battery");
