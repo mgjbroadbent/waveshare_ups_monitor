@@ -25,6 +25,21 @@ jobs:
           # Build the exact commit the release tag points at.
           ref: ${{ github.event.release.tag_name }}
 
+      - name: Verify Cargo.toml version matches the release tag
+        run: |
+          # Read the version from the [package] table only, so a `version` key
+          # under [dependencies] can never be picked up by mistake.
+          cargo_version="$(awk -F' *= *' '
+            /^\[/ { in_pkg = ($0 == "[package]") }
+            in_pkg && $1 == "version" { gsub(/"/, "", $2); print $2; exit }
+          ' Cargo.toml)"
+          tag_version="${TAG#v}"
+          if [[ "${cargo_version}" != "${tag_version}" ]]; then
+            echo "Cargo.toml version (${cargo_version}) does not match release tag (${tag_version})." >&2
+            exit 1
+          fi
+          echo "Cargo.toml version matches release tag: ${tag_version}"
+
       - name: Install the latest stable Rust
         run: |
           rustup update stable
